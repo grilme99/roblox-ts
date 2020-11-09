@@ -1,9 +1,12 @@
+/* eslint-disable no-console */
+
 import ts from "byots";
 import fs from "fs-extra";
 import { renderAST } from "LuauRenderer";
 import path from "path";
-import { transformPaths } from "Project/transformers/transformPaths";
-import { transformTypeReferenceDirectives } from "Project/transformers/transformTypeReferenceDirectives";
+import { transformPaths } from "Project/transformers/declaration/transformPaths";
+import { transformTypeReferenceDirectives } from "Project/transformers/declaration/transformTypeReferenceDirectives";
+import { PluginCreator } from "Project/transformers/PluginCreator";
 import { ProjectData, ProjectServices } from "Project/types";
 import { getCustomPreEmitDiagnostics } from "Project/util/getCustomPreEmitDiagnostics";
 import { hasErrors } from "Project/util/hasErrors";
@@ -99,16 +102,53 @@ export function compileFiles(
 	LogService.writeLineIfVerbose(`Compiling as ${projectType}..`);
 
 	const diagnostics = new Array<ts.Diagnostic>();
+
+	{
+		const pluginCreator = new PluginCreator(ts, compilerOptions.plugins ?? [], data.projectPath);
+		const mergedTransformers = pluginCreator.createTransformers({ program });
+		const beforeTransformers = mergedTransformers.before as Array<ts.TransformerFactory<ts.SourceFile>>;
+
+		const transformResult = ts.transformNodes(
+			typeChecker.getEmitResolver(),
+			undefined,
+			ts.factory,
+			compilerOptions,
+			sourceFiles,
+			beforeTransformers,
+			false,
+		);
+
+		diagnostics.push(...(transformResult.diagnostics ?? []));
+		if (hasErrors(diagnostics)) return { emitSkipped: false, diagnostics };
+
+		sourceFiles = transformResult.transformed;
+		transformResult.dispose();
+
+		for (const sourceFile of sourceFiles) {
+			ts.setParentRecursive(sourceFile, false);
+			ts.bindSourceFile(sourceFile, compilerOptions);
+		}
+	}
+
 	const fileWriteQueue = new Array<{ sourceFile: ts.SourceFile; source: string }>();
 	const progressMaxLength = `${sourceFiles.length}/${sourceFiles.length}`.length;
 	for (let i = 0; i < sourceFiles.length; i++) {
 		const sourceFile = sourceFiles[i];
 		const progress = `${i + 1}/${sourceFiles.length}`.padStart(progressMaxLength);
 		benchmarkIfVerbose(`${progress} compile ${path.relative(process.cwd(), sourceFile.fileName)}`, () => {
-			diagnostics.push(...getCustomPreEmitDiagnostics(sourceFile));
-			if (hasErrors(diagnostics)) return;
-			diagnostics.push(...ts.getPreEmitDiagnostics(program, sourceFile));
-			if (hasErrors(diagnostics)) return;
+			console.log(ts.createPrinter().printFile(sourceFile));
+
+			// console.log(sourceFile.getText());
+
+			// console.log("custom pre-emit diagnostics", sourceFile.fileName);
+			// diagnostics.push(...getCustomPreEmitDiagnostics(sourceFile));
+			// if (hasErrors(diagnostics)) return;
+
+			// console.log("TS pre-emit diagnostics", sourceFile.fileName);
+			// diagnostics.push(...ts.getPreEmitDiagnostics(program, sourceFile));
+			// if (hasErrors(diagnostics)) return;
+
+			console.log("transform");
 
 			const transformState = new TransformState(
 				data,

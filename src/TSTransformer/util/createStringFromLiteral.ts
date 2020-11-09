@@ -10,7 +10,7 @@ const TEMPLATE_EXP_END = "}".length;
  * Cannot just use `node.text` because that converts `\\n` to be `\n`.
  */
 export function createStringFromLiteral(node: ts.TemplateLiteralToken | ts.StringLiteral): luau.StringLiteral {
-	let text = node.getText();
+	let text = ts.getLiteralText(node, node.getSourceFile(), 1);
 	if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
 		text = ts.stripQuotes(text);
 	} else if (ts.isTemplateHead(node)) {
